@@ -6,8 +6,6 @@ import (
 
 	"github.com/dlclark/regexp2"
 
-	"github.com/metacubex/mihomo/adapter"
-
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/constant/provider"
@@ -29,6 +27,7 @@ type Proxy struct {
 	Subtitle string `json:"subtitle"`
 	Type     string `json:"type"`
 	Delay    int    `json:"delay"`
+	IsGroup  bool   `json:"isGroup"`
 }
 
 type ProxyGroup struct {
@@ -61,7 +60,7 @@ func QueryProxyGroupNames(excludeNotSelectable bool) []string {
 		return []string{}
 	}
 
-	global := tunnel.Proxies()["GLOBAL"].(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup)
+	global := tunnel.Proxies()["GLOBAL"].Adapter().(outboundgroup.ProxyGroup)
 	proxies := global.Providers()[0].Proxies()
 	result := make([]string, 0, len(proxies)+1)
 
@@ -70,8 +69,11 @@ func QueryProxyGroupNames(excludeNotSelectable bool) []string {
 	}
 
 	for _, p := range proxies {
-		if _, ok := p.(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup); ok {
+		if g, ok := p.Adapter().(outboundgroup.ProxyGroup); ok {
 			if !excludeNotSelectable || p.Type() == C.Selector {
+				if g.Hidden() {
+					continue
+				}
 				result = append(result, p.Name())
 			}
 		}
@@ -89,7 +91,7 @@ func QueryProxyGroup(name string, sortMode SortMode, uiSubtitlePattern *regexp2.
 		return nil
 	}
 
-	g, ok := p.(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup)
+	g, ok := p.Adapter().(outboundgroup.ProxyGroup)
 	if !ok {
 		log.Warnln("Query group `%s`: invalid type %s", name, p.Type().String())
 
@@ -138,14 +140,14 @@ func PatchSelector(selector, name string) bool {
 		return false
 	}
 
-	g, ok := p.(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup)
+	g, ok := p.Adapter().(outboundgroup.ProxyGroup)
 	if !ok {
 		log.Warnln("Patch selector `%s`: invalid type %s", selector, p.Type().String())
 
 		return false
 	}
 
-	s, ok := g.(*outboundgroup.Selector)
+	s, ok := g.(outboundgroup.SelectAble)
 	if !ok {
 		log.Warnln("Patch selector `%s`: invalid type %s", selector, p.Type().String())
 
@@ -172,7 +174,7 @@ func convertProxies(proxies []C.Proxy, uiSubtitlePattern *regexp2.Regexp) []*Pro
 		subtitle := p.Type().String()
 
 		if uiSubtitlePattern != nil {
-			if _, ok := p.(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup); !ok {
+			if _, ok := p.Adapter().(outboundgroup.ProxyGroup); !ok {
 				runes := []rune(name)
 				match, err := uiSubtitlePattern.FindRunesMatch(runes)
 				if err == nil && match != nil {
@@ -188,6 +190,7 @@ func convertProxies(proxies []C.Proxy, uiSubtitlePattern *regexp2.Regexp) []*Pro
 				break
 			}
 		}
+		_, isGroup := p.Adapter().(outboundgroup.ProxyGroup)
 
 		result = append(result, &Proxy{
 			Name:     name,
@@ -195,6 +198,7 @@ func convertProxies(proxies []C.Proxy, uiSubtitlePattern *regexp2.Regexp) []*Pro
 			Subtitle: strings.TrimSpace(subtitle),
 			Type:     p.Type().String(),
 			Delay:    int(p.LastDelayForTestUrl(testURL)),
+			IsGroup:  isGroup,
 		})
 	}
 	return result
@@ -210,7 +214,7 @@ func collectProviders(providers []provider.ProxyProvider, uiSubtitlePattern *reg
 			subtitle := px.Type().String()
 
 			if uiSubtitlePattern != nil {
-				if _, ok := px.(*adapter.Proxy).ProxyAdapter.(outboundgroup.ProxyGroup); !ok {
+				if _, ok := px.Adapter().(outboundgroup.ProxyGroup); !ok {
 					runes := []rune(name)
 					match, err := uiSubtitlePattern.FindRunesMatch(runes)
 					if err == nil && match != nil {
@@ -227,6 +231,7 @@ func collectProviders(providers []provider.ProxyProvider, uiSubtitlePattern *reg
 					break
 				}
 			}
+			_, isGroup := px.Adapter().(outboundgroup.ProxyGroup)
 
 			result = append(result, &Proxy{
 				Name:     name,
@@ -234,6 +239,7 @@ func collectProviders(providers []provider.ProxyProvider, uiSubtitlePattern *reg
 				Subtitle: strings.TrimSpace(subtitle),
 				Type:     px.Type().String(),
 				Delay:    int(px.LastDelayForTestUrl(testURL)),
+				IsGroup:  isGroup,
 			})
 		}
 	}
